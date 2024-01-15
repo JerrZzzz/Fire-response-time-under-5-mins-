@@ -4,23 +4,193 @@ format: pdf
 editor: visual
 ---
 
-## Quarto
+## Introduction
 
 Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
 
-## Running Code
+## Setup
 
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
-
-```{r}
-1 + 1
-```
-
-You can add options to executable code like this
+To find a data set that we are interested in.
 
 ```{r}
-#| echo: false
-2 * 2
+library(opendatatoronto)
+library(tidyverse)
+library(janitor)
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+```{r}
+datasets <- list_packages()
+View(datasets)
+```
+
+I am interested in a data set called "Traffic Cameras". Next step is to get the package itself, and let's look at the top 6 rows of the dataset.
+
+```{r}
+url <- "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/64a26694-01dc-4ec3-aa87-ad8509604f50/resource/1e824947-d73b-4f48-9bac-7f7f3731a6b9/download/Fire%20Incidents%20Data.csv"
+
+destination <- "Fire.csv"
+
+download.file(url, destfile = destination)
+
+fire <- read.csv(destination)
+
+head(fire)
+```
+
+I am interested in the response time for different region in toronto.
+
+## cleaning the data
+
+First, let's clean the names for the fire data.
+
+```{r}
+c_fire <-
+  clean_names(fire)
+
+head(c_fire)
+```
+
+Second, choose only the column called incident_station_area, tfs-alarm-time and tfs_arrival_time. Then, my dataset would be much easier to look.
+
+```{r}
+c_fire <-
+  c_fire |>
+  select(
+    incident_station_area,
+    tfs_alarm_time, 
+    tfs_arrival_time
+  )
+
+head(c_fire)
+```
+
+Now, let's see how many station areas are there.
+
+```{r}
+c_fire$incident_station_area |>
+  unique()
+```
+
+```{r}
+str(c_fire)
+
+c_fire$tfs_alarm_time <- as.POSIXct(c_fire$tfs_alarm_time, format="%Y-%m-%dT%H:%M:%S", tz="UTC")
+c_fire$tfs_arrival_time <- as.POSIXct(c_fire$tfs_arrival_time, format="%Y-%m-%dT%H:%M:%S", tz="UTC")
+```
+
+```{r}
+c_fire$time_difference <- c_fire$tfs_arrival_time -c_fire$tfs_alarm_time
+
+head(c_fire)
+```
+
+We have used the alarm time and arrival time. So we can drop all the columns only hold our station area and time difference. 
+
+```{r}
+c_fire <-
+  c_fire |>
+  select(
+    incident_station_area,
+    time_difference
+  )
+
+head(c_fire)
+```
+
+So, we finished cleaning the data. And We need to put our data in the output data file.
+
+```{r}
+write_csv(
+  x = c_fire, file = "cleaned_Fire.csv"
+)
+```
+
+## Plotting 
+
+We have our data interested in the data set called c_fire. We want to use this data set to make a plot so that we could visualize the response time for each area. 
+
+```{r}
+c_fire$incident_station_area <- as.factor(c_fire$incident_station_area)
+```
+
+Since that our dataset has a lot of data points, a scatter plot would be a good choice. 
+
+```{r}
+plot(c_fire$incident_station_area, c_fire$time_difference,
+     xlab = "Incident Station Area",
+     ylab = "Time Difference",
+     main = "Scatter Plot of Time Difference by Incident Station Area",
+     col = rainbow(length(unique(c_fire$incident_station_area))),
+     pch = 19)
+```
+
+We can see that the graph is clearly destroyed by a few point which is a outlier. I want to clear those outliers by filtering the data points. 
+
+```{r}
+f_c_fire <- subset(c_fire, time_difference <= 10000)
+
+head(f_c_fire)
+```
+
+```{r}
+f_c_fire$incident_station_area <- as.factor(f_c_fire$incident_station_area)
+
+plot(f_c_fire$incident_station_area, f_c_fire$time_difference,
+     xlab = "Incident Station Area",
+     ylab = "Time Difference",
+     main = "Scatter Plot of Time Difference by Incident Station Area",
+     col = rainbow(length(unique(f_c_fire$incident_station_area))),
+     pch = 19)
+```
+
+We still cannot efficiently understand the distribution of the whole thing. So I want to see how much station achieve the time difference in different level: 0 to 200 seconds, 200 to 400 seconds, 400 to 600 seconds, 600 to 800 seconds, 800 to 1000 seconds, 1000 to 1200 seconds, 1200 to 1500 seconds, 1500 seconds and more. 
+
+```{r}
+c_fire$time_difference <- as.numeric(as.character(c_fire$time_difference))
+
+c_fire$level <- cut(c_fire$time_difference,
+                    breaks = c(0, 200, 400, 600, 800, 1000, 1200, 1500, Inf),
+                    labels = c("0-200", "200-400", "400-600", "600-800", 
+                               "800-1000", "1000-1200", "1200-1500", "1500+"),
+                    right = FALSE)
+
+head(c_fire)
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(c_fire, aes(x = level)) +
+  geom_bar() +  
+  theme_minimal() +
+  labs(title = "Frequency of Time Difference Levels",
+       x = "Time Difference Level",
+       y = "Frequency") +
+  scale_x_discrete(name = "Time Difference Level") + 
+  scale_y_continuous(name = "Frequency") 
+```
+
+## Analyze the data
+
+We can see that on the graph almost all the data points lies in the level of 200 seconds to 400 seconds which is about 5 minutes. However, there is a few outliers which has its level over 2000 second shown in the table below. These maybe human errors for example, maybe someone forget to record the time of arrival. So I would ignore those data on the graph. 
+
+```{r}
+outliers <- subset(c_fire, time_difference > 2000)
+
+head(outliers)
+```
+
+We can see that the graph shown a uniform distribution, by dividing the number of rows whose level is 200 to 400 by the total number of rows. We get 73.7%, meaning that 73.7% of all the fire response time is between 200 seconds and 400 seconds. And 81.8% of all fire response time is under 400 seconds which is 6.6 minutes.  
+
+```{r}
+nrow(subset(c_fire, level == "200-400"))/nrow(c_fire)
+
+(nrow(subset(c_fire, level == "200-400"))+nrow(subset(c_fire, level == "0-200")))/nrow(c_fire)
+
+(nrow(subset(c_fire, level == "200-400"))+nrow(subset(c_fire, level == "0-200"))+nrow(subset(c_fire, level == "400-600")))/nrow(c_fire)
+```
+
+## Conclusion
+
+We can see from the graphs that we make and the data that we calculated that over 80% of time Toronto fire team in 2018 will arrive on scene within 6.67 minutes. It also shown that 98% of the time fire team will arrive on scene within 10 minutes. So if we encountered a fire, even with the unluckiest case, fire team is always able to be on cite in 10 minutes. We still have to know basic survival knowledge in order to protect ourselves till fire fighters arrive. 
+
