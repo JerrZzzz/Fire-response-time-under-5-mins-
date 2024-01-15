@@ -1,5 +1,5 @@
 ---
-title: "Mini Essay 2"
+title: "Is it true that fire response time is under 10 minutes?"
 author: "Zhijun Zhong"
 format: pdf
 editor: visual
